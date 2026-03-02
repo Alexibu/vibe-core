@@ -1,3 +1,12 @@
+2.14.0 - 2026-03-02
+===================
+
+- Added an overload of `listenTCP` that takes a `NetworkAddress` as the bind address - [pull #444][issue444]
+- Fixed storing longer Unix domain sockets paths in `NetworkAddress` - [pull #444][issue444]
+
+[issue444]: https://github.com/vibe-core/vibe-core/issues/444
+
+
 2.13.5 - 2026-02-13
 ===================
 
