@@ -332,7 +332,10 @@ struct NetworkAddress {
 		sockaddr_in6 addr_ip6;
 	}
 
-	enum socklen_t sockAddrMaxLen = max(addr.sizeof, addr_ip6.sizeof);
+	version (Posix)
+		enum socklen_t sockAddrMaxLen = max(addr.sizeof, addr_ip6.sizeof, sockaddr_un.sizeof);
+	else
+		enum socklen_t sockAddrMaxLen = max(addr.sizeof, addr_ip6.sizeof);
 
 
 	this(scope const(Address) addr)
