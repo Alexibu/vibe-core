@@ -128,6 +128,11 @@ TCPListener listenTCP(ushort port, TCPConnectionDelegate connection_callback, st
 {
 	auto addr = resolveHost(address);
 	addr.port = port;
+	return listenTCP(connection_callback, addr, options);
+}
+/// ditto
+TCPListener listenTCP(TCPConnectionDelegate connection_callback, NetworkAddress bind_address, TCPListenOptions options = TCPListenOptions.defaults)
+{
 	StreamListenOptions sopts = StreamListenOptions.defaults;
 	if (options & TCPListenOptions.reuseAddress)
 		sopts |= StreamListenOptions.reuseAddress;
@@ -143,14 +148,14 @@ TCPListener listenTCP(ushort port, TCPConnectionDelegate connection_callback, st
 		else
 			sopts &= ~StreamListenOptions.ipTransparent;
 	}
-	scope addrc = new RefAddress(addr.sockAddr, addr.sockAddrLen);
+	scope addrc = new RefAddress(bind_address.sockAddr, bind_address.sockAddrLen);
 	auto sock = eventDriver.sockets.listenStream(addrc, sopts,
 		(StreamListenSocketFD ls, StreamSocketFD s, scope RefAddress addr) @safe nothrow {
 			import vibe.core.core : runTask;
 			auto conn = TCPConnection(s, addr);
 			runTask(connection_callback, conn);
 		});
-	enforce(sock != StreamListenSocketFD.invalid, "Failed to listen on "~addr.toString());
+	enforce(sock != StreamListenSocketFD.invalid, "Failed to listen on "~bind_address.toString());
 	return TCPListener(sock);
 }
 
