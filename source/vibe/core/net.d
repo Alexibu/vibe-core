@@ -836,6 +836,14 @@ struct TCPConnection {
 		catch (Exception) {}
 		m_context.diag.readTrace = issuerTrace;
 
+		// Capture pointers to the Context (lives in eventcore's userData,
+		// kept alive by our addRef above) and Diag (GC-rooted via the slot)
+		// so that, even if a concurrent close() zeroes m_socket / m_context
+		// on this struct, we can still recover the closer's identity in the
+		// callback below.
+		auto ctxBefore  = m_context;
+		auto diagBefore = m_context.diag;
+
 		alias waiter = Waitable!(IOCallback,
 			cb => eventDriver.sockets.read(m_socket, m_context.readBuffer.peekDst(), mode, cb),
 			(cb) { cancelled = true; eventDriver.sockets.cancelRead(m_socket); },
@@ -852,7 +860,11 @@ struct TCPConnection {
 					try cbTask = Task.getThis();
 					catch (Exception) {}
 					auto ageMs = (MonoTime.currTime - issuedAt).total!"msecs";
-					Diag* d = (m_context !is null) ? m_context.diag : null;
+					// Prefer the captured-before-await pointers: m_context may
+					// have been zeroed by a concurrent close(), but the slot
+					// itself is kept alive by the addRef we made before await.
+					Diag* d = diagBefore;
+					if (d is null && m_context !is null) d = m_context.diag;
 					long sinceCloseMs = -1;
 					if (d !is null && d.closeRecorded)
 						sinceCloseMs = (MonoTime.currTime - d.closedAt).total!"msecs";
@@ -873,7 +885,7 @@ struct TCPConnection {
 						~ "  current m_socket = %s\n"
 						~ "  callback sock = %s\n"
 						~ "  IOStatus = %s, nbytes = %s\n"
-						~ "  m_context = %s\n"
+						~ "  m_context (current) = %s; (before await) = %s\n"
 						~ "  read issued at %s:%s by task %s, %s ms ago\n"
 						~ "  callback delivered to task %s\n"
 						~ "  connection created at %s:%s by task %s\n"
@@ -883,6 +895,7 @@ struct TCPConnection {
 						cast(int)sock, cast(int)m_socket, cast(int)sock_cb,
 						st, nb,
 						() @trusted { return cast(void*)m_context; } (),
+						() @trusted { return cast(void*)ctxBefore; } (),
 						file, line, issuerTask, ageMs,
 						cbTask,
 						(d !is null) ? d.createdFile : "<diag gone>",
