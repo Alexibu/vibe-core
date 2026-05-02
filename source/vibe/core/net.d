@@ -774,7 +774,7 @@ struct TCPConnection {
 				// when called through wrappers like operations.pipe(),
 				// ConnectionStream.close, HTTPClientResponse.disconnect, etc.
 				try m_context.closedTrace = () @trusted { return defaultTraceHandler(null); } ();
-				catch (Throwable) {}
+				catch (Exception) {}
 			}
 			eventDriver.sockets.shutdown(m_socket, true, true);
 			eventDriver.sockets.releaseRef(m_socket);
@@ -820,7 +820,7 @@ struct TCPConnection {
 		m_context.readIssuedAt = issuedAt;
 		Throwable.TraceInfo issuerTrace;
 		try issuerTrace = () @trusted { return defaultTraceHandler(null); } ();
-		catch (Throwable) {}
+		catch (Exception) {}
 		m_context.readTrace = issuerTrace;
 
 		alias waiter = Waitable!(IOCallback,
@@ -845,14 +845,14 @@ struct TCPConnection {
 					string readTraceStr = "<unavailable>";
 					if (issuerTrace !is null) {
 						try readTraceStr = () @trusted { return issuerTrace.toString(); } ();
-						catch (Throwable) {}
+						catch (Exception) {}
 					}
 					string closeTraceStr = "<no close recorded>";
 					if (m_context !is null && m_context.closeRecorded
 						&& m_context.closedTrace !is null) {
 						try closeTraceStr = () @trusted {
 							return m_context.closedTrace.toString(); } ();
-						catch (Throwable) {}
+						catch (Exception) {}
 					}
 					logError(
 						"TCPConnection.waitForDataEx: m_socket invariant violated.\n"
