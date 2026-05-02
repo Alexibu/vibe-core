@@ -645,15 +645,10 @@ struct TCPConnection {
 	import vibe.internal.array : BatchBuffer;
 	//static assert(isConnectionStream!TCPConnection);
 
-	static struct Context {
-		BatchBuffer!ubyte readBuffer;
-		bool tcpNoDelay = false;
-		bool keepAlive = false;
-		Duration readTimeout = Duration.max;
-		string remoteAddressString;
-		shared(NativeEventDriver) driver;
-
-		// --- Diagnostics for net.d:768-style invariant violations ---------
+	// Diagnostic state for net.d:768-style invariant violations. Heap
+	// allocated and pointed to from Context so that Context itself stays
+	// within eventcore's fixed-size (16*size_t) FD-slot user-data buffer.
+	static struct Diag {
 		// Identity of the call site / fiber that constructed this connection
 		string createdFile;
 		size_t createdLine;
@@ -674,6 +669,16 @@ struct TCPConnection {
 		Throwable.TraceInfo readTrace;
 	}
 
+	static struct Context {
+		BatchBuffer!ubyte readBuffer;
+		bool tcpNoDelay = false;
+		bool keepAlive = false;
+		Duration readTimeout = Duration.max;
+		string remoteAddressString;
+		shared(NativeEventDriver) driver;
+		Diag* diag;
+	}
+
 	private {
 		StreamSocketFD m_socket;
 		Context* m_context;
@@ -688,12 +693,14 @@ struct TCPConnection {
 		m_context = () @trusted { return &eventDriver.sockets.userData!Context(socket); } ();
 		m_context.readBuffer.capacity = 4096;
 		m_context.driver = () @trusted { return cast(shared)eventDriver; } ();
-		m_context.createdFile = file;
-		m_context.createdLine = line;
-		try m_context.createdTask = Task.getThis();
+		if (m_context.diag is null)
+			m_context.diag = new Diag;
+		m_context.diag.createdFile = file;
+		m_context.diag.createdLine = line;
+		try m_context.diag.createdTask = Task.getThis();
 		catch (Exception) {}
-		m_context.createdAt   = MonoTime.currTime;
-		m_context.closeRecorded = false;
+		m_context.diag.createdAt   = MonoTime.currTime;
+		m_context.diag.closeRecorded = false;
 	}
 
 	this(this)
@@ -763,17 +770,18 @@ struct TCPConnection {
 			// The underlying Context lives in eventcore's userData and stays
 			// alive as long as any addRef (e.g. waitForDataEx's inner one)
 			// is held against the FD.
-			if (m_context !is null) {
-				m_context.closedFile = file;
-				m_context.closedLine = line;
-				try m_context.closedTask = Task.getThis();
+			if (m_context !is null && m_context.diag !is null) {
+				auto d = m_context.diag;
+				d.closedFile = file;
+				d.closedLine = line;
+				try d.closedTask = Task.getThis();
 				catch (Exception) {}
-				m_context.closedAt = MonoTime.currTime;
-				m_context.closeRecorded = true;
+				d.closedAt = MonoTime.currTime;
+				d.closeRecorded = true;
 				// Capture a stack trace so the closer can be identified even
 				// when called through wrappers like operations.pipe(),
 				// ConnectionStream.close, HTTPClientResponse.disconnect, etc.
-				try m_context.closedTrace = () @trusted { return defaultTraceHandler(null); } ();
+				try d.closedTrace = () @trusted { return defaultTraceHandler(null); } ();
 				catch (Exception) {}
 			}
 			eventDriver.sockets.shutdown(m_socket, true, true);
@@ -814,14 +822,19 @@ struct TCPConnection {
 		try issuerTask = Task.getThis();
 		catch (Exception) {}
 		auto issuedAt = MonoTime.currTime;
-		m_context.readFile = file;
-		m_context.readLine = line;
-		m_context.readTask = issuerTask;
-		m_context.readIssuedAt = issuedAt;
+		if (m_context.diag is null)
+			m_context.diag = new Diag;
+		{
+			auto d = m_context.diag;
+			d.readFile = file;
+			d.readLine = line;
+			d.readTask = issuerTask;
+			d.readIssuedAt = issuedAt;
+		}
 		Throwable.TraceInfo issuerTrace;
 		try issuerTrace = () @trusted { return defaultTraceHandler(null); } ();
 		catch (Exception) {}
-		m_context.readTrace = issuerTrace;
+		m_context.diag.readTrace = issuerTrace;
 
 		alias waiter = Waitable!(IOCallback,
 			cb => eventDriver.sockets.read(m_socket, m_context.readBuffer.peekDst(), mode, cb),
@@ -839,19 +852,19 @@ struct TCPConnection {
 					try cbTask = Task.getThis();
 					catch (Exception) {}
 					auto ageMs = (MonoTime.currTime - issuedAt).total!"msecs";
+					Diag* d = (m_context !is null) ? m_context.diag : null;
 					long sinceCloseMs = -1;
-					if (m_context !is null && m_context.closeRecorded)
-						sinceCloseMs = (MonoTime.currTime - m_context.closedAt).total!"msecs";
+					if (d !is null && d.closeRecorded)
+						sinceCloseMs = (MonoTime.currTime - d.closedAt).total!"msecs";
 					string readTraceStr = "<unavailable>";
 					if (issuerTrace !is null) {
 						try readTraceStr = () @trusted { return issuerTrace.toString(); } ();
 						catch (Exception) {}
 					}
 					string closeTraceStr = "<no close recorded>";
-					if (m_context !is null && m_context.closeRecorded
-						&& m_context.closedTrace !is null) {
+					if (d !is null && d.closeRecorded && d.closedTrace !is null) {
 						try closeTraceStr = () @trusted {
-							return m_context.closedTrace.toString(); } ();
+							return d.closedTrace.toString(); } ();
 						catch (Exception) {}
 					}
 					logError(
@@ -872,15 +885,15 @@ struct TCPConnection {
 						() @trusted { return cast(void*)m_context; } (),
 						file, line, issuerTask, ageMs,
 						cbTask,
-						(m_context !is null) ? m_context.createdFile : "<context gone>",
-						(m_context !is null) ? m_context.createdLine : 0,
-						(m_context !is null) ? format("%s", m_context.createdTask) : "<unknown>",
-						(m_context !is null && m_context.closeRecorded) ?
+						(d !is null) ? d.createdFile : "<diag gone>",
+						(d !is null) ? d.createdLine : 0,
+						(d !is null) ? format("%s", d.createdTask) : "<unknown>",
+						(d !is null && d.closeRecorded) ?
 							" called at " : " not yet recorded",
-						(m_context !is null && m_context.closeRecorded) ?
-							format("%s:%s", m_context.closedFile, m_context.closedLine) : "",
-						(m_context !is null && m_context.closeRecorded) ?
-							format(" by task %s", m_context.closedTask) : "",
+						(d !is null && d.closeRecorded) ?
+							format("%s:%s", d.closedFile, d.closedLine) : "",
+						(d !is null && d.closeRecorded) ?
+							format(" by task %s", d.closedTask) : "",
 						(sinceCloseMs >= 0) ?
 							format(" %s ms before this callback", sinceCloseMs) : "",
 						readTraceStr,
