@@ -765,7 +765,8 @@ struct TCPConnection {
 					cancelled = true;
 					return;
 				}
-				assert(sock == m_socket); status = st; nbytes = nb;
+				if (sock != m_socket) { cancelled = true; return; }
+				status = st; nbytes = nb;
 			}
 		);
 
