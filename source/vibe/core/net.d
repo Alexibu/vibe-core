@@ -716,6 +716,8 @@ struct TCPConnection {
 	}
 
 	@property int fd() const nothrow { return cast(int)m_socket; }
+	/// Returns the raw StreamSocketFD for use with eventcore operations.
+	@property StreamSocketFD socketFD() const nothrow { return m_socket; }
 
 	bool opCast(T)() const nothrow if (is(T == bool)) { return m_socket != StreamSocketFD.invalid; }
 
