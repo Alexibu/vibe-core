@@ -1155,11 +1155,7 @@ enum WaitForDataAsyncStatus {
 	waiting,
 }
 
-enum WaitForDataStatus {
-	dataAvailable,
-	noMoreData,
-	timeout
-}
+
 
 unittest { // test compilation of callback with scoped destruction
 	static struct CB {
