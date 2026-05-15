@@ -343,6 +343,14 @@ interface Stream : InputStream, OutputStream {
 }
 
 
+/** Three-state return value for `waitForDataEx`.
+*/
+enum WaitForDataStatus {
+	dataAvailable,
+	noMoreData,
+	timeout
+}
+
 /**
 	Interface for streams based on a connection.
 
@@ -386,6 +394,21 @@ interface ConnectionStream : Stream {
 			If the connection gets closed, or the timeout gets reached, `false` is returned instead.
 	*/
 	bool waitForData(Duration timeout = Duration.max) @blocking;
+	
+	/** Three-state version of `waitForData` that distinguishes data, EOF, and timeout.
+
+		Params:
+			timeout = Optional timeout, the default value of `Duration.max` waits without a timeout.
+
+		Returns:
+			A `WaitForDataStatus` value:
+			$(UL
+				$(LI `dataAvailable` — new data is available for reading)
+				$(LI `noMoreData` — the connection has been closed (EOF))
+				$(LI `timeout` — the specified timeout was reached)
+			)
+	*/
+	WaitForDataStatus waitForDataEx(Duration timeout = Duration.max) @blocking;
 }
 
 
